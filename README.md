@@ -20,12 +20,12 @@ python3 -m venv .venv
 
 **Na Linux:**
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 **Na Windows:**
 ```bash
-venv\Scripts\activate
+.venv\Scripts\activate
 ```
 
 #### 3. Instalacja wymaganych pakietów
@@ -37,7 +37,7 @@ pip install -r requirements.txt
 ## Struktura projektu
 
 ```
-plate_license_recognition/
+siamese-audio-classifier/
 ├── dataset/                 # Zbiór danych
 │   └── MAD_dataset/        # Dataset MAD
 │       ├── training/       # Dane treningowe
