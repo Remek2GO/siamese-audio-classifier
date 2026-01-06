@@ -1,3 +1,8 @@
 dataset/
 archive.zip
 YAMNet.ipynb
+.python-version
+.venv/
+.vscode/
+sys
+MAD_dataset/
