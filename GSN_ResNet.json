@@ -1,0 +1,1575 @@
+{
+    "cells": [
+        {
+            "cell_type": "code",
+            "source": [
+                "!pip install pandas torch torchaudio lightning kagglehub scikit-learn ipython soundfile wandb gdown torchcodec\n",
+                "\n",
+                "import os\n",
+                "import shutil\n",
+                "import random\n",
+                "import glob\n",
+                "import pandas as pd\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "import torch.nn as nn\n",
+                "import torch.nn.functional as F\n",
+                "import torchaudio\n",
+                "import torchaudio.transforms as T\n",
+                "import pytorch_lightning as pl\n",
+                "from torch.utils.data import Dataset, DataLoader\n",
+                "from torchvision.models import resnet18\n",
+                "from sklearn.model_selection import train_test_split\n",
+                "from pytorch_lightning.loggers import WandbLogger\n",
+                "from pytorch_lightning.callbacks import ModelCheckpoint\n",
+                "import kagglehub\n",
+                "import gdown\n",
+                "from pathlib import Path\n",
+                "import wandb\n",
+                "\n",
+                "# Ustawienie ziarna losowości dla powtarzalności\n",
+                "pl.seed_everything(42)\n",
+                "wandb.login()"
+            ],
+            "metadata": {
+                "colab": {
+                    "base_uri": "https://localhost:8080/"
+                },
+                "id": "iJN_G9rWiSwO",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767450622124,
+                    "user_tz": -60,
+                    "elapsed": 31330,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                },
+                "outputId": "ba845c2a-30a3-4d61-8dd3-91c6a53c958e"
+            },
+            "id": "iJN_G9rWiSwO",
+            "execution_count": 1,
+            "outputs": [
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Requirement already satisfied: pandas in /usr/local/lib/python3.12/dist-packages (2.2.2)\n",
+                        "Requirement already satisfied: torch in /usr/local/lib/python3.12/dist-packages (2.9.0+cu126)\n",
+                        "Requirement already satisfied: torchaudio in /usr/local/lib/python3.12/dist-packages (2.9.0+cu126)\n",
+                        "Collecting lightning\n",
+                        "  Downloading lightning-2.6.0-py3-none-any.whl.metadata (44 kB)\n",
+                        "\u001b[2K     \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m44.9/44.9 kB\u001b[0m \u001b[31m2.8 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hRequirement already satisfied: kagglehub in /usr/local/lib/python3.12/dist-packages (0.3.13)\n",
+                        "Requirement already satisfied: scikit-learn in /usr/local/lib/python3.12/dist-packages (1.6.1)\n",
+                        "Requirement already satisfied: ipython in /usr/local/lib/python3.12/dist-packages (7.34.0)\n",
+                        "Requirement already satisfied: soundfile in /usr/local/lib/python3.12/dist-packages (0.13.1)\n",
+                        "Requirement already satisfied: wandb in /usr/local/lib/python3.12/dist-packages (0.23.1)\n",
+                        "Requirement already satisfied: gdown in /usr/local/lib/python3.12/dist-packages (5.2.0)\n",
+                        "Collecting torchcodec\n",
+                        "  Downloading torchcodec-0.9.1-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (11 kB)\n",
+                        "Requirement already satisfied: numpy>=1.26.0 in /usr/local/lib/python3.12/dist-packages (from pandas) (2.0.2)\n",
+                        "Requirement already satisfied: python-dateutil>=2.8.2 in /usr/local/lib/python3.12/dist-packages (from pandas) (2.9.0.post0)\n",
+                        "Requirement already satisfied: pytz>=2020.1 in /usr/local/lib/python3.12/dist-packages (from pandas) (2025.2)\n",
+                        "Requirement already satisfied: tzdata>=2022.7 in /usr/local/lib/python3.12/dist-packages (from pandas) (2025.3)\n",
+                        "Requirement already satisfied: filelock in /usr/local/lib/python3.12/dist-packages (from torch) (3.20.0)\n",
+                        "Requirement already satisfied: typing-extensions>=4.10.0 in /usr/local/lib/python3.12/dist-packages (from torch) (4.15.0)\n",
+                        "Requirement already satisfied: setuptools in /usr/local/lib/python3.12/dist-packages (from torch) (75.2.0)\n",
+                        "Requirement already satisfied: sympy>=1.13.3 in /usr/local/lib/python3.12/dist-packages (from torch) (1.14.0)\n",
+                        "Requirement already satisfied: networkx>=2.5.1 in /usr/local/lib/python3.12/dist-packages (from torch) (3.6.1)\n",
+                        "Requirement already satisfied: jinja2 in /usr/local/lib/python3.12/dist-packages (from torch) (3.1.6)\n",
+                        "Requirement already satisfied: fsspec>=0.8.5 in /usr/local/lib/python3.12/dist-packages (from torch) (2025.3.0)\n",
+                        "Requirement already satisfied: nvidia-cuda-nvrtc-cu12==12.6.77 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.77)\n",
+                        "Requirement already satisfied: nvidia-cuda-runtime-cu12==12.6.77 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.77)\n",
+                        "Requirement already satisfied: nvidia-cuda-cupti-cu12==12.6.80 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.80)\n",
+                        "Requirement already satisfied: nvidia-cudnn-cu12==9.10.2.21 in /usr/local/lib/python3.12/dist-packages (from torch) (9.10.2.21)\n",
+                        "Requirement already satisfied: nvidia-cublas-cu12==12.6.4.1 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.4.1)\n",
+                        "Requirement already satisfied: nvidia-cufft-cu12==11.3.0.4 in /usr/local/lib/python3.12/dist-packages (from torch) (11.3.0.4)\n",
+                        "Requirement already satisfied: nvidia-curand-cu12==10.3.7.77 in /usr/local/lib/python3.12/dist-packages (from torch) (10.3.7.77)\n",
+                        "Requirement already satisfied: nvidia-cusolver-cu12==11.7.1.2 in /usr/local/lib/python3.12/dist-packages (from torch) (11.7.1.2)\n",
+                        "Requirement already satisfied: nvidia-cusparse-cu12==12.5.4.2 in /usr/local/lib/python3.12/dist-packages (from torch) (12.5.4.2)\n",
+                        "Requirement already satisfied: nvidia-cusparselt-cu12==0.7.1 in /usr/local/lib/python3.12/dist-packages (from torch) (0.7.1)\n",
+                        "Requirement already satisfied: nvidia-nccl-cu12==2.27.5 in /usr/local/lib/python3.12/dist-packages (from torch) (2.27.5)\n",
+                        "Requirement already satisfied: nvidia-nvshmem-cu12==3.3.20 in /usr/local/lib/python3.12/dist-packages (from torch) (3.3.20)\n",
+                        "Requirement already satisfied: nvidia-nvtx-cu12==12.6.77 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.77)\n",
+                        "Requirement already satisfied: nvidia-nvjitlink-cu12==12.6.85 in /usr/local/lib/python3.12/dist-packages (from torch) (12.6.85)\n",
+                        "Requirement already satisfied: nvidia-cufile-cu12==1.11.1.6 in /usr/local/lib/python3.12/dist-packages (from torch) (1.11.1.6)\n",
+                        "Requirement already satisfied: triton==3.5.0 in /usr/local/lib/python3.12/dist-packages (from torch) (3.5.0)\n",
+                        "Requirement already satisfied: PyYAML<8.0,>5.4 in /usr/local/lib/python3.12/dist-packages (from lightning) (6.0.3)\n",
+                        "Collecting lightning-utilities<2.0,>=0.10.0 (from lightning)\n",
+                        "  Downloading lightning_utilities-0.15.2-py3-none-any.whl.metadata (5.7 kB)\n",
+                        "Requirement already satisfied: packaging<27.0,>=20.0 in /usr/local/lib/python3.12/dist-packages (from lightning) (25.0)\n",
+                        "Collecting torchmetrics<3.0,>0.7.0 (from lightning)\n",
+                        "  Downloading torchmetrics-1.8.2-py3-none-any.whl.metadata (22 kB)\n",
+                        "Requirement already satisfied: tqdm<6.0,>=4.57.0 in /usr/local/lib/python3.12/dist-packages (from lightning) (4.67.1)\n",
+                        "Collecting pytorch-lightning (from lightning)\n",
+                        "  Downloading pytorch_lightning-2.6.0-py3-none-any.whl.metadata (21 kB)\n",
+                        "Requirement already satisfied: requests in /usr/local/lib/python3.12/dist-packages (from kagglehub) (2.32.4)\n",
+                        "Requirement already satisfied: scipy>=1.6.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn) (1.16.3)\n",
+                        "Requirement already satisfied: joblib>=1.2.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn) (1.5.3)\n",
+                        "Requirement already satisfied: threadpoolctl>=3.1.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn) (3.6.0)\n",
+                        "Collecting jedi>=0.16 (from ipython)\n",
+                        "  Downloading jedi-0.19.2-py2.py3-none-any.whl.metadata (22 kB)\n",
+                        "Requirement already satisfied: decorator in /usr/local/lib/python3.12/dist-packages (from ipython) (4.4.2)\n",
+                        "Requirement already satisfied: pickleshare in /usr/local/lib/python3.12/dist-packages (from ipython) (0.7.5)\n",
+                        "Requirement already satisfied: traitlets>=4.2 in /usr/local/lib/python3.12/dist-packages (from ipython) (5.7.1)\n",
+                        "Requirement already satisfied: prompt-toolkit!=3.0.0,!=3.0.1,<3.1.0,>=2.0.0 in /usr/local/lib/python3.12/dist-packages (from ipython) (3.0.52)\n",
+                        "Requirement already satisfied: pygments in /usr/local/lib/python3.12/dist-packages (from ipython) (2.19.2)\n",
+                        "Requirement already satisfied: backcall in /usr/local/lib/python3.12/dist-packages (from ipython) (0.2.0)\n",
+                        "Requirement already satisfied: matplotlib-inline in /usr/local/lib/python3.12/dist-packages (from ipython) (0.2.1)\n",
+                        "Requirement already satisfied: pexpect>4.3 in /usr/local/lib/python3.12/dist-packages (from ipython) (4.9.0)\n",
+                        "Requirement already satisfied: cffi>=1.0 in /usr/local/lib/python3.12/dist-packages (from soundfile) (2.0.0)\n",
+                        "Requirement already satisfied: click>=8.0.1 in /usr/local/lib/python3.12/dist-packages (from wandb) (8.3.1)\n",
+                        "Requirement already satisfied: gitpython!=3.1.29,>=1.0.0 in /usr/local/lib/python3.12/dist-packages (from wandb) (3.1.45)\n",
+                        "Requirement already satisfied: platformdirs in /usr/local/lib/python3.12/dist-packages (from wandb) (4.5.1)\n",
+                        "Requirement already satisfied: protobuf!=4.21.0,!=5.28.0,<7,>=3.19.0 in /usr/local/lib/python3.12/dist-packages (from wandb) (5.29.5)\n",
+                        "Requirement already satisfied: pydantic<3 in /usr/local/lib/python3.12/dist-packages (from wandb) (2.12.3)\n",
+                        "Requirement already satisfied: sentry-sdk>=2.0.0 in /usr/local/lib/python3.12/dist-packages (from wandb) (2.47.0)\n",
+                        "Requirement already satisfied: beautifulsoup4 in /usr/local/lib/python3.12/dist-packages (from gdown) (4.13.5)\n",
+                        "Requirement already satisfied: pycparser in /usr/local/lib/python3.12/dist-packages (from cffi>=1.0->soundfile) (2.23)\n",
+                        "Requirement already satisfied: aiohttp!=4.0.0a0,!=4.0.0a1 in /usr/local/lib/python3.12/dist-packages (from fsspec[http]<2027.0,>=2022.5.0->lightning) (3.13.2)\n",
+                        "Requirement already satisfied: gitdb<5,>=4.0.1 in /usr/local/lib/python3.12/dist-packages (from gitpython!=3.1.29,>=1.0.0->wandb) (4.0.12)\n",
+                        "Requirement already satisfied: parso<0.9.0,>=0.8.4 in /usr/local/lib/python3.12/dist-packages (from jedi>=0.16->ipython) (0.8.5)\n",
+                        "Requirement already satisfied: ptyprocess>=0.5 in /usr/local/lib/python3.12/dist-packages (from pexpect>4.3->ipython) (0.7.0)\n",
+                        "Requirement already satisfied: wcwidth in /usr/local/lib/python3.12/dist-packages (from prompt-toolkit!=3.0.0,!=3.0.1,<3.1.0,>=2.0.0->ipython) (0.2.14)\n",
+                        "Requirement already satisfied: annotated-types>=0.6.0 in /usr/local/lib/python3.12/dist-packages (from pydantic<3->wandb) (0.7.0)\n",
+                        "Requirement already satisfied: pydantic-core==2.41.4 in /usr/local/lib/python3.12/dist-packages (from pydantic<3->wandb) (2.41.4)\n",
+                        "Requirement already satisfied: typing-inspection>=0.4.2 in /usr/local/lib/python3.12/dist-packages (from pydantic<3->wandb) (0.4.2)\n",
+                        "Requirement already satisfied: six>=1.5 in /usr/local/lib/python3.12/dist-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)\n",
+                        "Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/dist-packages (from requests->kagglehub) (3.4.4)\n",
+                        "Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/dist-packages (from requests->kagglehub) (3.11)\n",
+                        "Requirement already satisfied: urllib3<3,>=1.21.1 in /usr/local/lib/python3.12/dist-packages (from requests->kagglehub) (2.5.0)\n",
+                        "Requirement already satisfied: certifi>=2017.4.17 in /usr/local/lib/python3.12/dist-packages (from requests->kagglehub) (2025.11.12)\n",
+                        "Requirement already satisfied: mpmath<1.4,>=1.1.0 in /usr/local/lib/python3.12/dist-packages (from sympy>=1.13.3->torch) (1.3.0)\n",
+                        "Requirement already satisfied: soupsieve>1.2 in /usr/local/lib/python3.12/dist-packages (from beautifulsoup4->gdown) (2.8)\n",
+                        "Requirement already satisfied: MarkupSafe>=2.0 in /usr/local/lib/python3.12/dist-packages (from jinja2->torch) (3.0.3)\n",
+                        "Requirement already satisfied: PySocks!=1.5.7,>=1.5.6 in /usr/local/lib/python3.12/dist-packages (from requests[socks]->gdown) (1.7.1)\n",
+                        "Requirement already satisfied: aiohappyeyeballs>=2.5.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (2.6.1)\n",
+                        "Requirement already satisfied: aiosignal>=1.4.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (1.4.0)\n",
+                        "Requirement already satisfied: attrs>=17.3.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (25.4.0)\n",
+                        "Requirement already satisfied: frozenlist>=1.1.1 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (1.8.0)\n",
+                        "Requirement already satisfied: multidict<7.0,>=4.5 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (6.7.0)\n",
+                        "Requirement already satisfied: propcache>=0.2.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (0.4.1)\n",
+                        "Requirement already satisfied: yarl<2.0,>=1.17.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<2027.0,>=2022.5.0->lightning) (1.22.0)\n",
+                        "Requirement already satisfied: smmap<6,>=3.0.1 in /usr/local/lib/python3.12/dist-packages (from gitdb<5,>=4.0.1->gitpython!=3.1.29,>=1.0.0->wandb) (5.0.2)\n",
+                        "Downloading lightning-2.6.0-py3-none-any.whl (845 kB)\n",
+                        "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m846.0/846.0 kB\u001b[0m \u001b[31m23.9 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hDownloading torchcodec-0.9.1-cp312-cp312-manylinux_2_28_x86_64.whl (2.1 MB)\n",
+                        "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m2.1/2.1 MB\u001b[0m \u001b[31m77.8 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hDownloading jedi-0.19.2-py2.py3-none-any.whl (1.6 MB)\n",
+                        "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m1.6/1.6 MB\u001b[0m \u001b[31m95.7 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hDownloading lightning_utilities-0.15.2-py3-none-any.whl (29 kB)\n",
+                        "Downloading torchmetrics-1.8.2-py3-none-any.whl (983 kB)\n",
+                        "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m983.2/983.2 kB\u001b[0m \u001b[31m81.3 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hDownloading pytorch_lightning-2.6.0-py3-none-any.whl (849 kB)\n",
+                        "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m849.5/849.5 kB\u001b[0m \u001b[31m73.3 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\n",
+                        "\u001b[?25hInstalling collected packages: torchcodec, lightning-utilities, jedi, torchmetrics, pytorch-lightning, lightning\n",
+                        "Successfully installed jedi-0.19.2 lightning-2.6.0 lightning-utilities-0.15.2 pytorch-lightning-2.6.0 torchcodec-0.9.1 torchmetrics-1.8.2\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "INFO:lightning_fabric.utilities.seed:Seed set to 42\n",
+                        "/usr/local/lib/python3.12/dist-packages/notebook/notebookapp.py:191: SyntaxWarning: invalid escape sequence '\\/'\n",
+                        "  | |_| | '_ \\/ _` / _` |  _/ -_)\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: (1) Create a W&B account\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: (2) Use an existing W&B account\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: (3) Don't visualize my results\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Enter your choice:"
+                    ]
+                },
+                {
+                    "name": "stdout",
+                    "output_type": "stream",
+                    "text": [
+                        " 2\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: You chose 'Use an existing W&B account'\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Logging into https://api.wandb.ai. (Learn how to deploy a W&B server locally: https://wandb.me/wandb-server)\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Find your API key here: https://wandb.ai/authorize\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Paste an API key from your profile and hit enter:"
+                    ]
+                },
+                {
+                    "name": "stdout",
+                    "output_type": "stream",
+                    "text": [
+                        " ··········\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: No netrc file found, creating one.\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Appending key for api.wandb.ai to your netrc file: /root/.netrc\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: Currently logged in as: \u001b[33mmajkamil\u001b[0m (\u001b[33mdeep-neural-network-course\u001b[0m) to \u001b[32mhttps://api.wandb.ai\u001b[0m. Use \u001b[1m`wandb login --relogin`\u001b[0m to force relogin\n"
+                    ]
+                },
+                {
+                    "output_type": "execute_result",
+                    "data": {
+                        "text/plain": [
+                            "True"
+                        ]
+                    },
+                    "metadata": {},
+                    "execution_count": 1
+                }
+            ]
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "# 1. Pobieranie Datasetu MAD\n",
+                "target_dir = \"dataset\"\n",
+                "if os.path.exists(target_dir) and len(os.listdir(target_dir)) > 0:\n",
+                "    print(f\"Dataset już istnieje w '{target_dir}'.\")\n",
+                "else:\n",
+                "    print(\"Pobieranie datasetu MAD...\")\n",
+                "    path = kagglehub.dataset_download(\"junewookim/mad-dataset-military-audio-dataset\")\n",
+                "    os.makedirs(target_dir, exist_ok=True)\n",
+                "    shutil.copytree(path, target_dir, dirs_exist_ok=True)\n",
+                "    print(\"Pobrano dataset MAD.\")\n",
+                "\n",
+                "# 2. Pobieranie Szumów (z Twojego pliku)\n",
+                "noise_folder = \"dataset/noises\"\n",
+                "os.makedirs(noise_folder, exist_ok=True)\n",
+                "url = \"https://drive.google.com/drive/folders/14Q_0KNDXACkFQ2oTF1T-gnjIaNbNuaKL?usp=sharing\"\n",
+                "\n",
+                "if not list(Path(noise_folder).glob(\"*.wav\")):\n",
+                "    print(\"Pobieranie szumów z Google Drive...\")\n",
+                "    try:\n",
+                "        gdown.download_folder(url, output=noise_folder, quiet=False, use_cookies=False)\n",
+                "        print(\"Pobrano szumy.\")\n",
+                "    except Exception as e:\n",
+                "        print(f\"Błąd pobierania szumów: {e}\")\n",
+                "else:\n",
+                "    print(f\"Szumy już istnieją w '{noise_folder}'.\")\n",
+                "\n",
+                "noise_files = list(glob.glob(os.path.join(noise_folder, \"*.wav\")))\n",
+                "print(f\"Liczba dostępnych plików szumu: {len(noise_files)}\")"
+            ],
+            "metadata": {
+                "colab": {
+                    "base_uri": "https://localhost:8080/"
+                },
+                "id": "sVxKeUBRiVgd",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767450659835,
+                    "user_tz": -60,
+                    "elapsed": 37708,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                },
+                "outputId": "b73a7d40-07f6-44dc-a399-bbbe00b41fe5"
+            },
+            "id": "sVxKeUBRiVgd",
+            "execution_count": 2,
+            "outputs": [
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Pobieranie datasetu MAD...\n",
+                        "Downloading from https://www.kaggle.com/api/v1/datasets/download/junewookim/mad-dataset-military-audio-dataset?dataset_version_number=1...\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "100%|██████████| 1.02G/1.02G [00:09<00:00, 111MB/s] "
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Extracting files...\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Pobrano dataset MAD.\n",
+                        "Pobieranie szumów z Google Drive...\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "Retrieving folder contents\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Processing file 1VIgTIcB9nm9Eg8QUgAx9_fIa_cH3ilhP 1765810864_Flying Drone Sound Effect_DUTQkbuzxtk_default.wav\n",
+                        "Processing file 1TAsKv8IkdAvDy1jX3O3oQx955OLY9eV2 1765810905_How does a drone sound in flight__6pnr-Pa27-k_default.wav\n",
+                        "Processing file 1J87RvCqNwIg9D55QtsGzWnS5zNgUbiAF 1765810943_Take off_Landing Drone Sound Effect_XpeymaZGrqI_default.wav\n",
+                        "Processing file 1kPQMOExku913AEkfNk0rQucgVwr1mAeX 1765811001_Helicopter Sound Effect - Flying 5 minutes_2RtDgTm6rn4_default.wav\n",
+                        "Processing file 1-3PRc9oXjr55iIKefeDiPidUUnf-TpVf 1765811406_Jet Fighter Flyby sound FX_PYDskj2yGiA_default.wav\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "Retrieving folder contents completed\n",
+                        "Building directory structure\n",
+                        "Building directory structure completed\n",
+                        "Downloading...\n",
+                        "From: https://drive.google.com/uc?id=1VIgTIcB9nm9Eg8QUgAx9_fIa_cH3ilhP\n",
+                        "To: /content/dataset/noises/1765810864_Flying Drone Sound Effect_DUTQkbuzxtk_default.wav\n",
+                        "100%|██████████| 1.29M/1.29M [00:00<00:00, 10.7MB/s]\n",
+                        "Downloading...\n",
+                        "From: https://drive.google.com/uc?id=1TAsKv8IkdAvDy1jX3O3oQx955OLY9eV2\n",
+                        "To: /content/dataset/noises/1765810905_How does a drone sound in flight__6pnr-Pa27-k_default.wav\n",
+                        "100%|██████████| 1.99M/1.99M [00:00<00:00, 14.5MB/s]\n",
+                        "Downloading...\n",
+                        "From: https://drive.google.com/uc?id=1J87RvCqNwIg9D55QtsGzWnS5zNgUbiAF\n",
+                        "To: /content/dataset/noises/1765810943_Take off_Landing Drone Sound Effect_XpeymaZGrqI_default.wav\n",
+                        "100%|██████████| 443k/443k [00:00<00:00, 4.95MB/s]\n",
+                        "Downloading...\n",
+                        "From: https://drive.google.com/uc?id=1kPQMOExku913AEkfNk0rQucgVwr1mAeX\n",
+                        "To: /content/dataset/noises/1765811001_Helicopter Sound Effect - Flying 5 minutes_2RtDgTm6rn4_default.wav\n",
+                        "100%|██████████| 5.11M/5.11M [00:00<00:00, 8.92MB/s]\n",
+                        "Downloading...\n",
+                        "From: https://drive.google.com/uc?id=1-3PRc9oXjr55iIKefeDiPidUUnf-TpVf\n",
+                        "To: /content/dataset/noises/1765811406_Jet Fighter Flyby sound FX_PYDskj2yGiA_default.wav\n",
+                        "100%|██████████| 1.89M/1.89M [00:00<00:00, 7.38MB/s]"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Pobrano szumy.\n",
+                        "Liczba dostępnych plików szumu: 5\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "\n",
+                        "Download completed\n"
+                    ]
+                }
+            ]
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "csv_path = \"dataset/MAD_dataset/training.csv\"\n",
+                "df_full = pd.read_csv(csv_path)\n",
+                "\n",
+                "# Mapowanie nazw kolumn\n",
+                "rename_map = {\n",
+                "    'filename': 'path',\n",
+                "    'class': 'label',\n",
+                "    'class_name': 'label'\n",
+                "}\n",
+                "df_full = df_full.rename(columns=rename_map)\n",
+                "\n",
+                "# Funkcja naprawiająca ścieżki\n",
+                "def fix_path(path):\n",
+                "    path = str(path)\n",
+                "    if not path.startswith(\"training/\"):\n",
+                "        return os.path.join(\"training\", path)\n",
+                "    return path\n",
+                "\n",
+                "df_full['path'] = df_full['path'].apply(fix_path)\n",
+                "print(f\"Załadowano DataFrame: {len(df_full)} plików.\")"
+            ],
+            "metadata": {
+                "colab": {
+                    "base_uri": "https://localhost:8080/"
+                },
+                "id": "NsDKwuuQiWvf",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767450659874,
+                    "user_tz": -60,
+                    "elapsed": 37,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                },
+                "outputId": "9e373453-5a2f-4ea5-a515-ad52e2fb3fd5"
+            },
+            "id": "NsDKwuuQiWvf",
+            "execution_count": 3,
+            "outputs": [
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Załadowano DataFrame: 6429 plików.\n"
+                    ]
+                }
+            ]
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "class CachedAudioDataset(Dataset):\n",
+                "    def __init__(self, df, root_dir, noise_files=None, training=True, target_len=150000, expansion_factor=1):\n",
+                "        \"\"\"\n",
+                "        expansion_factor: Ile razy powielić dataset w jednej epoce.\n",
+                "        Np. expansion_factor=5 sprawi, że dataset 6000 plików będzie \"widziany\" jako 30000.\n",
+                "        Każda kopia dostanie inną, losową augmentację.\n",
+                "        \"\"\"\n",
+                "        self.df = df.reset_index(drop=True)\n",
+                "        # Czyszczenie ścieżki (strip) i absolutna ścieżka\n",
+                "        self.root_dir = os.path.abspath(str(root_dir).strip())\n",
+                "        self.noise_files = noise_files\n",
+                "        self.training = training\n",
+                "        self.target_len = target_len\n",
+                "        self.expansion_factor = expansion_factor if training else 1 # Walidacji nie powielamy\n",
+                "        self.target_sr = 48000\n",
+                "\n",
+                "        self.labels_to_indices = self.df.groupby('label').groups\n",
+                "        self.all_labels = list(self.labels_to_indices.keys())\n",
+                "\n",
+                "        # 1. Cache SZUMÓW\n",
+                "        self.cached_noises = []\n",
+                "        if noise_files:\n",
+                "            print(f\"Cache'owanie {len(noise_files)} plików szumu...\")\n",
+                "            for nf in noise_files:\n",
+                "                try:\n",
+                "                    wav, sr = torchaudio.load(nf)\n",
+                "                    if sr != self.target_sr: wav = T.Resample(sr, self.target_sr)(wav)\n",
+                "                    if wav.shape[0] > 1: wav = wav.mean(dim=0, keepdim=True)\n",
+                "                    self.cached_noises.append(wav)\n",
+                "                except: pass\n",
+                "\n",
+                "        # 2. Cache DANYCH TRENINGOWYCH\n",
+                "        print(f\"Ładowanie {len(self.df)} plików treningowych z: {self.root_dir}\")\n",
+                "        self.audio_cache = []\n",
+                "\n",
+                "        errors = 0\n",
+                "        for i, row in enumerate(self.df.itertuples()):\n",
+                "            csv_path = str(row.path).strip()\n",
+                "            full_path = os.path.join(self.root_dir, csv_path)\n",
+                "\n",
+                "            try:\n",
+                "                if not os.path.exists(full_path):\n",
+                "                    raise FileNotFoundError(\"Plik nie istnieje\")\n",
+                "\n",
+                "                wav, sr = torchaudio.load(full_path)\n",
+                "                if sr != self.target_sr: wav = T.Resample(sr, self.target_sr)(wav)\n",
+                "                if wav.shape[0] > 1: wav = wav.mean(dim=0, keepdim=True)\n",
+                "\n",
+                "                if wav.shape[1] < self.target_len:\n",
+                "                    wav = F.pad(wav, (0, self.target_len - wav.shape[1]))\n",
+                "                elif wav.shape[1] > self.target_len:\n",
+                "                    start = (wav.shape[1] - self.target_len) // 2\n",
+                "                    wav = wav[:, start:start+self.target_len]\n",
+                "\n",
+                "                self.audio_cache.append(wav)\n",
+                "\n",
+                "            except Exception as e:\n",
+                "                errors += 1\n",
+                "                self.audio_cache.append(torch.randn(1, self.target_len) * 0.001)\n",
+                "\n",
+                "        if errors > 0:\n",
+                "            print(f\"⚠️ UWAGA: {errors} plików nie załadowano (wstawiono szum).\")\n",
+                "        else:\n",
+                "            print(\"✅ Wszystkie pliki w pamięci RAM.\")\n",
+                "\n",
+                "        if self.training and self.expansion_factor > 1:\n",
+                "            print(f\"🚀 DATASET ROZSZERZONY: {len(self.df)} plików -> {len(self)} wirtualnych próbek na epokę.\")\n",
+                "\n",
+                "    def aggressive_augment(self, waveform):\n",
+                "        # ... (ta funkcja pozostaje BEZ ZMIAN - skopiuj z poprzedniego kodu) ...\n",
+                "        # Wklejam skrótowo dla pewności, że zadziała:\n",
+                "        gain = random.uniform(0.5, 1.5)\n",
+                "        waveform = waveform * gain\n",
+                "        if self.cached_noises and random.random() > 0.3:\n",
+                "            noise_wav = random.choice(self.cached_noises)\n",
+                "            sig_len = waveform.shape[1]\n",
+                "            if noise_wav.shape[1] < sig_len:\n",
+                "                repeats = int(sig_len / noise_wav.shape[1]) + 1\n",
+                "                curr_noise = noise_wav.repeat(1, repeats)[:, :sig_len]\n",
+                "            else:\n",
+                "                start = random.randint(0, noise_wav.shape[1] - sig_len)\n",
+                "                curr_noise = noise_wav[:, start:start+sig_len]\n",
+                "            snr_db = random.uniform(5.0, 25.0)\n",
+                "            signal_power = waveform.norm(p=2)\n",
+                "            noise_power = curr_noise.norm(p=2)\n",
+                "            if noise_power > 0:\n",
+                "                snr = 10 ** (snr_db / 20)\n",
+                "                scale = signal_power / (noise_power * snr + 1e-9)\n",
+                "                waveform = waveform + (curr_noise * scale)\n",
+                "        return waveform\n",
+                "\n",
+                "    # --- MAGIA DZIEJE SIĘ TUTAJ ---\n",
+                "    def __len__(self):\n",
+                "        # Dataset udaje, że jest większy niż w rzeczywistości\n",
+                "        return len(self.df) * self.expansion_factor\n",
+                "\n",
+                "    def __getitem__(self, idx):\n",
+                "        # Mapujemy wirtualny indeks (np. 15000) na prawdziwy (np. 3000)\n",
+                "        # Używając modulo (%)\n",
+                "        real_idx = idx % len(self.df)\n",
+                "\n",
+                "        wav_a = self.audio_cache[real_idx].clone()\n",
+                "        label_a = self.df.iloc[real_idx]['label']\n",
+                "\n",
+                "        # Ponieważ augmentacja jest losowa, wywołanie jej tutaj za każdym razem da INNY wynik\n",
+                "        # Nawet jeśli real_idx jest ten sam.\n",
+                "        if self.training:\n",
+                "            wav_a = self.aggressive_augment(wav_a)\n",
+                "\n",
+                "        # Positive\n",
+                "        idxs_p = self.labels_to_indices[label_a]\n",
+                "        # Wybieramy pozytywa (innego niż my, jeśli możliwe)\n",
+                "        possible_p = idxs_p.drop(real_idx, errors='ignore')\n",
+                "        idx_p = random.choice(possible_p) if len(possible_p) > 0 else real_idx\n",
+                "\n",
+                "        wav_p = self.audio_cache[idx_p].clone()\n",
+                "        if self.training: wav_p = self.aggressive_augment(wav_p)\n",
+                "\n",
+                "        # Negative\n",
+                "        label_n = random.choice([l for l in self.all_labels if l != label_a])\n",
+                "        idx_n = random.choice(self.labels_to_indices[label_n])\n",
+                "        wav_n = self.audio_cache[idx_n].clone()\n",
+                "        if self.training: wav_n = self.aggressive_augment(wav_n)\n",
+                "\n",
+                "        return wav_a, wav_p, wav_n"
+            ],
+            "metadata": {
+                "id": "jVMXh1B8iagH",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767450659896,
+                    "user_tz": -60,
+                    "elapsed": 11,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                }
+            },
+            "id": "jVMXh1B8iagH",
+            "execution_count": 4,
+            "outputs": []
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "class ResNetTripletGPU(pl.LightningModule):\n",
+                "    def __init__(self, df, root_dir, noise_files, margin=1.0, learning_rate=1e-4):\n",
+                "        super().__init__()\n",
+                "        self.save_hyperparameters(ignore=['df', 'root_dir', 'noise_files'])\n",
+                "        self.df = df\n",
+                "        self.root_dir = root_dir\n",
+                "        self.noise_files = noise_files\n",
+                "\n",
+                "        # 1. Transformacja na GPU\n",
+                "        self.spec_layer = T.MelSpectrogram(\n",
+                "            sample_rate=48000, n_fft=1024, hop_length=512, n_mels=64, f_min=20, f_max=24000\n",
+                "        )\n",
+                "        self.db_layer = T.AmplitudeToDB()\n",
+                "\n",
+                "        # 2. Backbone\n",
+                "        self.backbone = resnet18(weights='IMAGENET1K_V1')\n",
+                "\n",
+                "        # Dostosowanie ResNet do 1 kanału\n",
+                "        original_conv1 = self.backbone.conv1\n",
+                "        self.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)\n",
+                "        with torch.no_grad():\n",
+                "            self.backbone.conv1.weight.data = original_conv1.weight.data.sum(dim=1, keepdim=True)\n",
+                "\n",
+                "        self.backbone.fc = nn.Sequential(\n",
+                "            nn.Linear(512, 256, bias=False), # Większa warstwa pośrednia\n",
+                "            nn.BatchNorm1d(256),             # Stabilizuje trening (bardzo ważne!)\n",
+                "            nn.ReLU(inplace=True),           # Nieliniowość - to daje \"moc\"\n",
+                "            nn.Dropout(0.2),                 # Opcjonalnie: zapobiega overfittingowi\n",
+                "            nn.Linear(256, 128)              # Ostateczna projekcja\n",
+                "        )\n",
+                "        # -----------------------------------------------------------\n",
+                "\n",
+                "        self.loss_fn = nn.TripletMarginLoss(margin=margin, p=2)\n",
+                "\n",
+                "    def compute_features(self, wav):\n",
+                "        # To dzieje się na GPU!\n",
+                "        spec = self.spec_layer(wav)\n",
+                "        spec = self.db_layer(spec)\n",
+                "        # Normalizacja batcha\n",
+                "        spec = (spec - spec.mean()) / (spec.std() + 1e-6)\n",
+                "        return self.backbone(spec)\n",
+                "\n",
+                "    def forward(self, x):\n",
+                "        return F.normalize(self.compute_features(x), p=2, dim=1)\n",
+                "\n",
+                "    def training_step(self, batch, batch_idx):\n",
+                "        wav_a, wav_p, wav_n = batch\n",
+                "\n",
+                "        # Forward pass (robi spektrogramy + resnet)\n",
+                "        emb_a = self(wav_a)\n",
+                "        emb_p = self(wav_p)\n",
+                "        emb_n = self(wav_n)\n",
+                "\n",
+                "        loss = self.loss_fn(emb_a, emb_p, emb_n)\n",
+                "\n",
+                "        acc = (F.pairwise_distance(emb_a, emb_p) < F.pairwise_distance(emb_a, emb_n)).float().mean()\n",
+                "        self.log(\"train_loss\", loss, prog_bar=True)\n",
+                "        self.log(\"train_acc\", acc, prog_bar=True)\n",
+                "        return loss\n",
+                "\n",
+                "    def validation_step(self, batch, batch_idx):\n",
+                "        wav_a, wav_p, wav_n = batch\n",
+                "        emb_a = self(wav_a)\n",
+                "        emb_p = self(wav_p)\n",
+                "        emb_n = self(wav_n)\n",
+                "\n",
+                "        loss = self.loss_fn(emb_a, emb_p, emb_n)\n",
+                "        acc = (F.pairwise_distance(emb_a, emb_p) < F.pairwise_distance(emb_a, emb_n)).float().mean()\n",
+                "\n",
+                "        self.log(\"val_loss\", loss, prog_bar=True)\n",
+                "        self.log(\"val_acc\", acc, prog_bar=True)\n",
+                "        return loss\n",
+                "\n",
+                "    def test_step(self, batch, batch_idx):\n",
+                "        # To samo co walidacja, ale dla zbioru testowego\n",
+                "        wav_a, wav_p, wav_n = batch\n",
+                "        emb_a = self(wav_a)\n",
+                "        emb_p = self(wav_p)\n",
+                "        emb_n = self(wav_n)\n",
+                "\n",
+                "        loss = self.loss_fn(emb_a, emb_p, emb_n)\n",
+                "        acc = (F.pairwise_distance(emb_a, emb_p) < F.pairwise_distance(emb_a, emb_n)).float().mean()\n",
+                "\n",
+                "        # Logujemy jako 'test_loss' i 'test_acc'\n",
+                "        self.log(\"test_loss\", loss)\n",
+                "        self.log(\"test_acc\", acc)\n",
+                "        return loss\n",
+                "\n",
+                "    def configure_optimizers(self):\n",
+                "        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)\n",
+                "\n",
+                "    def train_dataloader(self):\n",
+                "        train_df, _ = train_test_split(self.df, test_size=0.2, random_state=42, stratify=self.df['label'])\n",
+                "\n",
+                "        ds = CachedAudioDataset(\n",
+                "            train_df,\n",
+                "            self.root_dir,\n",
+                "            self.noise_files,\n",
+                "            training=True,\n",
+                "            expansion_factor=5  # <--- ZMIANA: Każdy plik zostanie użyty 5 razy w każdej epoce\n",
+                "        )\n",
+                "\n",
+                "        return DataLoader(ds, batch_size=64, shuffle=True, num_workers=2, persistent_workers=True)\n",
+                "    def val_dataloader(self):\n",
+                "        _, val_df = train_test_split(self.df, test_size=0.2, random_state=42, stratify=self.df['label'])\n",
+                "        ds = CachedAudioDataset(val_df, self.root_dir, noise_files=None, training=False)\n",
+                "        return DataLoader(ds, batch_size=64, shuffle=False, num_workers=2, persistent_workers=True)"
+            ],
+            "metadata": {
+                "id": "_FMaHiiBib6R",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767450659907,
+                    "user_tz": -60,
+                    "elapsed": 9,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                }
+            },
+            "id": "_FMaHiiBib6R",
+            "execution_count": 5,
+            "outputs": []
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "import datetime\n",
+                "\n",
+                "# ==========================================\n",
+                "# KONFIGURACJA UNIKALNEGO TRENINGU\n",
+                "# ==========================================\n",
+                "\n",
+                "# 1. Tworzymy unikalną nazwę folderu na podstawie daty i godziny\n",
+                "# Dzięki temu każde uruchomienie stworzy nowy folder i nie nadpisze starych modeli\n",
+                "timestamp = datetime.datetime.now().strftime(\"%Y-%m-%d_%H-%M-%S\")\n",
+                "run_name = f\"ResNet_Triplet_{timestamp}\"\n",
+                "checkpoint_dir = os.path.join(\"checkpoints\", run_name)\n",
+                "\n",
+                "# Tworzymy ten folder fizycznie\n",
+                "os.makedirs(checkpoint_dir, exist_ok=True)\n",
+                "print(f\"📂 Checkpointy z tego treningu trafią do: {checkpoint_dir}\")\n",
+                "\n",
+                "# ==========================================\n",
+                "# CALLBACKI I LOGGER\n",
+                "# ==========================================\n",
+                "\n",
+                "# 2. Konfiguracja Checkpointu (Najlepszy model wg ACCURACY)\n",
+                "checkpoint_best = ModelCheckpoint(\n",
+                "    monitor=\"val_acc\",       # <--- ZMIANA: Patrzymy na Accuracy\n",
+                "    mode=\"max\",              # <--- ZMIANA: Im więcej tym lepiej (dla loss było 'min')\n",
+                "    dirpath=checkpoint_dir,  # <--- ZMIANA: Zapis do unikalnego folderu\n",
+                "    filename=\"best-epoch={epoch:02d}-acc={val_acc:.4f}\", # W nazwie pliku też będzie acc\n",
+                "    save_top_k=1,            # Zapisz tylko 1 najlepszy model\n",
+                "    auto_insert_metric_name=False\n",
+                ")\n",
+                "\n",
+                "# 3. Checkpoint okresowy (co 5 epok) - też do tego samego folderu\n",
+                "checkpoint_periodic = ModelCheckpoint(\n",
+                "    dirpath=checkpoint_dir,\n",
+                "    filename=\"periodic-epoch={epoch:02d}\",\n",
+                "    every_n_epochs=5,\n",
+                "    save_last=True\n",
+                "    save_top_k=-1\n",
+                ")\n",
+                "\n",
+                "# 4. WandB Logger (Też używa tej samej nazwy runu)\n",
+                "wandb_logger = WandbLogger(\n",
+                "    project=\"siamese-audio-classifier\",\n",
+                "    name=run_name,           # Nazwa w panelu WandB będzie taka sama jak folderu\n",
+                "    log_model=False\n",
+                ")\n",
+                "\n",
+                "# ==========================================\n",
+                "# START TRENINGU\n",
+                "# ==========================================\n",
+                "\n",
+                "ROOT_DIR = \"/content/dataset/MAD_dataset\" # Upewnij się, że to dobra ścieżka!\n",
+                "\n",
+                "model = ResNetTripletGPU(\n",
+                "    df=df_full,\n",
+                "    root_dir=ROOT_DIR,\n",
+                "    noise_files=noise_files,\n",
+                "    margin=0.5\n",
+                ")\n",
+                "\n",
+                "trainer = pl.Trainer(\n",
+                "    max_epochs=20,\n",
+                "    accelerator=\"auto\",\n",
+                "    devices=1,\n",
+                "    logger=wandb_logger,\n",
+                "    callbacks=[checkpoint_best, checkpoint_periodic],\n",
+                "    log_every_n_steps=10,\n",
+                "    precision=32,\n",
+                "    gradient_clip_val=1.0\n",
+                ")\n",
+                "\n",
+                "print(f\"🚀 Rozpoczynam trening: {run_name}\")\n",
+                "trainer.fit(model)\n",
+                "\n",
+                "print(\"Trening zakończony.\")\n",
+                "wandb.finish()"
+            ],
+            "metadata": {
+                "colab": {
+                    "base_uri": "https://localhost:8080/",
+                    "height": 1000,
+                    "referenced_widgets": [
+                        "d3be773f6b1841cc911be5e118c9e886",
+                        "0951d72ee79c466a82748ecb7c6af851"
+                    ]
+                },
+                "id": "vnlpd1xbidaM",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767451976316,
+                    "user_tz": -60,
+                    "elapsed": 1316330,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                },
+                "outputId": "1a11008d-7b81-438f-f75d-76f07cf023a5"
+            },
+            "id": "vnlpd1xbidaM",
+            "execution_count": 6,
+            "outputs": [
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "📂 Checkpointy z tego treningu trafią do: checkpoints/ResNet_Triplet_2026-01-03_14-30-56\n",
+                        "Downloading: \"https://download.pytorch.org/models/resnet18-f37072fd.pth\" to /root/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "100%|██████████| 44.7M/44.7M [00:00<00:00, 194MB/s]\n",
+                        "INFO:pytorch_lightning.utilities.rank_zero:GPU available: True (cuda), used: True\n",
+                        "INFO:pytorch_lightning.utilities.rank_zero:TPU available: False, using: 0 TPU cores\n",
+                        "/usr/local/lib/python3.12/dist-packages/torch/__init__.py:1551: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)\n",
+                        "  return _C._get_float32_matmul_precision()\n",
+                        "INFO:pytorch_lightning.utilities.rank_zero:You are using a CUDA device ('NVIDIA L4') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision\n",
+                        "\u001b[34m\u001b[1mwandb\u001b[0m: \u001b[33mWARNING\u001b[0m The anonymous setting has no effect and will be removed in a future version.\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "🚀 Rozpoczynam trening: ResNet_Triplet_2026-01-03_14-30-56\n"
+                    ]
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": []
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            "Tracking run with wandb version 0.23.1"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            "Run data is saved locally in <code>wandb/run-20260103_143057-r0rfoibr</code>"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            "Syncing run <strong><a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier/runs/r0rfoibr' target=\"_blank\">ResNet_Triplet_2026-01-03_14-30-56</a></strong> to <a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier' target=\"_blank\">Weights & Biases</a> (<a href='https://wandb.me/developer-guide' target=\"_blank\">docs</a>)<br>"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            " View project at <a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier' target=\"_blank\">https://wandb.ai/deep-neural-network-course/siamese-audio-classifier</a>"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            " View run at <a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier/runs/r0rfoibr' target=\"_blank\">https://wandb.ai/deep-neural-network-course/siamese-audio-classifier/runs/r0rfoibr</a>"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "INFO:pytorch_lightning.accelerators.cuda:LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]\n"
+                    ]
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "┏━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┓\n",
+                            "┃\u001b[1;35m \u001b[0m\u001b[1;35m \u001b[0m\u001b[1;35m \u001b[0m┃\u001b[1;35m \u001b[0m\u001b[1;35mName      \u001b[0m\u001b[1;35m \u001b[0m┃\u001b[1;35m \u001b[0m\u001b[1;35mType             \u001b[0m\u001b[1;35m \u001b[0m┃\u001b[1;35m \u001b[0m\u001b[1;35mParams\u001b[0m\u001b[1;35m \u001b[0m┃\u001b[1;35m \u001b[0m\u001b[1;35mMode \u001b[0m\u001b[1;35m \u001b[0m┃\u001b[1;35m \u001b[0m\u001b[1;35mFLOPs\u001b[0m\u001b[1;35m \u001b[0m┃\n",
+                            "┡━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━┩\n",
+                            "│\u001b[2m \u001b[0m\u001b[2m0\u001b[0m\u001b[2m \u001b[0m│ spec_layer │ MelSpectrogram    │      0 │ train │     0 │\n",
+                            "│\u001b[2m \u001b[0m\u001b[2m1\u001b[0m\u001b[2m \u001b[0m│ db_layer   │ AmplitudeToDB     │      0 │ train │     0 │\n",
+                            "│\u001b[2m \u001b[0m\u001b[2m2\u001b[0m\u001b[2m \u001b[0m│ backbone   │ ResNet            │ 11.3 M │ train │     0 │\n",
+                            "│\u001b[2m \u001b[0m\u001b[2m3\u001b[0m\u001b[2m \u001b[0m│ loss_fn    │ TripletMarginLoss │      0 │ train │     0 │\n",
+                            "└───┴────────────┴───────────────────┴────────┴───────┴───────┘\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">┏━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┓\n",
+                            "┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\">   </span>┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\"> Name       </span>┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\"> Type              </span>┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\"> Params </span>┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\"> Mode  </span>┃<span style=\"color: #800080; text-decoration-color: #800080; font-weight: bold\"> FLOPs </span>┃\n",
+                            "┡━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━┩\n",
+                            "│<span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\"> 0 </span>│ spec_layer │ MelSpectrogram    │      0 │ train │     0 │\n",
+                            "│<span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\"> 1 </span>│ db_layer   │ AmplitudeToDB     │      0 │ train │     0 │\n",
+                            "│<span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\"> 2 </span>│ backbone   │ ResNet            │ 11.3 M │ train │     0 │\n",
+                            "│<span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\"> 3 </span>│ loss_fn    │ TripletMarginLoss │      0 │ train │     0 │\n",
+                            "└───┴────────────┴───────────────────┴────────┴───────┴───────┘\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "\u001b[1mTrainable params\u001b[0m: 11.3 M                                                                                           \n",
+                            "\u001b[1mNon-trainable params\u001b[0m: 0                                                                                            \n",
+                            "\u001b[1mTotal params\u001b[0m: 11.3 M                                                                                               \n",
+                            "\u001b[1mTotal estimated model params size (MB)\u001b[0m: 45                                                                         \n",
+                            "\u001b[1mModules in train mode\u001b[0m: 78                                                                                          \n",
+                            "\u001b[1mModules in eval mode\u001b[0m: 0                                                                                            \n",
+                            "\u001b[1mTotal FLOPs\u001b[0m: 0                                                                                                     \n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"><span style=\"font-weight: bold\">Trainable params</span>: 11.3 M                                                                                           \n",
+                            "<span style=\"font-weight: bold\">Non-trainable params</span>: 0                                                                                            \n",
+                            "<span style=\"font-weight: bold\">Total params</span>: 11.3 M                                                                                               \n",
+                            "<span style=\"font-weight: bold\">Total estimated model params size (MB)</span>: 45                                                                         \n",
+                            "<span style=\"font-weight: bold\">Modules in train mode</span>: 78                                                                                          \n",
+                            "<span style=\"font-weight: bold\">Modules in eval mode</span>: 0                                                                                            \n",
+                            "<span style=\"font-weight: bold\">Total FLOPs</span>: 0                                                                                                     \n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "Output()"
+                        ],
+                        "application/vnd.jupyter.widget-view+json": {
+                            "version_major": 2,
+                            "version_minor": 0,
+                            "model_id": "d3be773f6b1841cc911be5e118c9e886"
+                        }
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "Ładowanie 1286 plików treningowych z: /content/dataset/MAD_dataset\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">Ładowanie 1286 plików treningowych z: /content/dataset/MAD_dataset\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "✅ Wszystkie pliki w pamięci RAM.\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">✅ Wszystkie pliki w pamięci RAM.\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "Cache'owanie 5 plików szumu...\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">Cache'owanie 5 plików szumu...\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "Ładowanie 5143 plików treningowych z: /content/dataset/MAD_dataset\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">Ładowanie 5143 plików treningowych z: /content/dataset/MAD_dataset\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "✅ Wszystkie pliki w pamięci RAM.\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">✅ Wszystkie pliki w pamięci RAM.\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "🚀 DATASET ROZSZERZONY: 5143 plików -> 25715 wirtualnych próbek na epokę.\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">🚀 DATASET ROZSZERZONY: 5143 plików -&gt; 25715 wirtualnych próbek na epokę.\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "INFO:pytorch_lightning.utilities.rank_zero:`Trainer.fit` stopped: `max_epochs=20` reached.\n"
+                    ]
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"></pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "Trening zakończony.\n"
+                    ]
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": []
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            "<br>    <style><br>        .wandb-row {<br>            display: flex;<br>            flex-direction: row;<br>            flex-wrap: wrap;<br>            justify-content: flex-start;<br>            width: 100%;<br>        }<br>        .wandb-col {<br>            display: flex;<br>            flex-direction: column;<br>            flex-basis: 100%;<br>            flex: 1;<br>            padding: 10px;<br>        }<br>    </style><br><div class=\"wandb-row\"><div class=\"wandb-col\"><h3>Run history:</h3><br/><table class=\"wandb\"><tr><td>epoch</td><td>▁▁▁▁▁▂▃▃▃▃▃▃▃▃▄▄▄▄▄▄▄▄▅▅▅▆▆▇▇▇▇▇▇▇▇█████</td></tr><tr><td>train_acc</td><td>▃▁▆█▅▆█▆▆█▆█▆██▅█▆▆██████████▆███▆███▆██</td></tr><tr><td>train_loss</td><td>█▃▂▂▂▂▂▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</td></tr><tr><td>trainer/global_step</td><td>▁▁▁▁▂▃▃▃▃▃▃▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇█████████</td></tr><tr><td>val_acc</td><td>▁▄▅▅▇▁▆█▇▆▆▇▆▆▇▆▂▅▅█</td></tr><tr><td>val_loss</td><td>▆▃▃▃▁▆▂▃▃▂▃▂▂▄▂▃█▃▄▂</td></tr></table><br/></div><div class=\"wandb-col\"><h3>Run summary:</h3><br/><table class=\"wandb\"><tr><td>epoch</td><td>19</td></tr><tr><td>train_acc</td><td>0.98039</td></tr><tr><td>train_loss</td><td>0.04075</td></tr><tr><td>trainer/global_step</td><td>8039</td></tr><tr><td>val_acc</td><td>0.97667</td></tr><tr><td>val_loss</td><td>0.04137</td></tr></table><br/></div></div>"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            " View run <strong style=\"color:#cdcd00\">ResNet_Triplet_2026-01-03_14-30-56</strong> at: <a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier/runs/r0rfoibr' target=\"_blank\">https://wandb.ai/deep-neural-network-course/siamese-audio-classifier/runs/r0rfoibr</a><br> View project at: <a href='https://wandb.ai/deep-neural-network-course/siamese-audio-classifier' target=\"_blank\">https://wandb.ai/deep-neural-network-course/siamese-audio-classifier</a><br>Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "<IPython.core.display.HTML object>"
+                        ],
+                        "text/html": [
+                            "Find logs at: <code>wandb/run-20260103_143057-r0rfoibr/logs</code>"
+                        ]
+                    },
+                    "metadata": {}
+                }
+            ]
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "wandb.finish()"
+            ],
+            "metadata": {
+                "id": "q0fBhySSrMc8",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767451976358,
+                    "user_tz": -60,
+                    "elapsed": 39,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                }
+            },
+            "id": "q0fBhySSrMc8",
+            "execution_count": 7,
+            "outputs": []
+        },
+        {
+            "cell_type": "markdown",
+            "source": [
+                "<H3> TEST\n"
+            ],
+            "metadata": {
+                "id": "HlcCp4yRQN-T"
+            },
+            "id": "HlcCp4yRQN-T"
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "import shutil\n",
+                "import os\n",
+                "import glob\n",
+                "from google.colab import drive\n",
+                "from torch.utils.data import DataLoader\n",
+                "\n",
+                "print(\"🛠️ KONFIGURACJA DYSKU I FOLDERÓW...\")\n",
+                "\n",
+                "# --- 1. NAPRAWA POŁĄCZENIA Z DYSKIEM ---\n",
+                "# Jeśli folder istnieje, ale nie jest montowaniem (pusta atrapa), usuwamy go\n",
+                "if os.path.exists('/content/drive') and not os.path.exists('/content/drive/MyDrive'):\n",
+                "    print(\"⚠️ Wykryto błędne montowanie. Naprawiam...\")\n",
+                "    shutil.rmtree('/content/drive')\n",
+                "\n",
+                "# Montowanie właściwe\n",
+                "if not os.path.exists('/content/drive'):\n",
+                "    drive.mount('/content/drive', force_remount=True)\n",
+                "\n",
+                "# --- 2. PRZYGOTOWANIE FOLDERU DOCELOWEGO ---\n",
+                "# Folder główny \"Models\"\n",
+                "BASE_DRIVE_DIR = \"/content/drive/MyDrive/studia/ProjektGsn/Models\"\n",
+                "\n",
+                "# Tworzymy PODFOLDER dla tego konkretnego runu (z datą z części 1)\n",
+                "# Jeśli zmienna 'run_name' zginęła (np. po restarcie), tworzymy nową z datą\n",
+                "if 'run_name' not in globals():\n",
+                "    import datetime\n",
+                "    run_name = f\"Manual_Run_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}\"\n",
+                "\n",
+                "TARGET_RUN_DIR = os.path.join(BASE_DRIVE_DIR, run_name)\n",
+                "\n",
+                "# Tworzymy foldery na Dysku Google\n",
+                "if not os.path.exists(TARGET_RUN_DIR):\n",
+                "    os.makedirs(TARGET_RUN_DIR, exist_ok=True)\n",
+                "    print(f\"✅ Utworzono nowy folder na wyniki: {TARGET_RUN_DIR}\")\n",
+                "else:\n",
+                "    print(f\"✅ Folder na wyniki już istnieje: {TARGET_RUN_DIR}\")\n",
+                "\n",
+                "# ==========================================\n",
+                "# 3. PROCEDURA TESTOWA (Tylko dla najlepszego modelu)\n",
+                "# ==========================================\n",
+                "print(\"\\n📊 ROZPOCZYNAM TESTOWANIE NAJLEPSZEGO MODELU...\")\n",
+                "\n",
+                "# ... (Ładowanie datasetu testowego - bez zmian) ...\n",
+                "if 'ROOT_DIR' not in globals(): ROOT_DIR = \"/content/dataset/MAD_dataset\"\n",
+                "test_csv_path = os.path.join(ROOT_DIR, \"test.csv\")\n",
+                "if not os.path.exists(test_csv_path): test_csv_path = \"dataset/MAD_dataset/test.csv\"\n",
+                "\n",
+                "df_test = pd.read_csv(test_csv_path)\n",
+                "def fix_test_path(path):\n",
+                "    path = str(path)\n",
+                "    if not path.startswith(\"test/\") and not path.startswith(\"training/\"): return os.path.join(\"test\", path)\n",
+                "    return path\n",
+                "df_test['path'] = df_test['path'].apply(fix_test_path)\n",
+                "\n",
+                "test_ds = CachedAudioDataset(df_test, root_dir=ROOT_DIR, noise_files=None, training=False, expansion_factor=1)\n",
+                "test_loader = DataLoader(test_ds, batch_size=64, shuffle=False, num_workers=2)\n",
+                "\n",
+                "# Pobieranie ścieżki NAJLEPSZEGO modelu lokalnie\n",
+                "if 'checkpoint_best' in globals():\n",
+                "    best_local_path = checkpoint_best.best_model_path\n",
+                "    last_local_path = checkpoint_best.last_model_path # To zadziała jeśli dałeś save_last=True\n",
+                "else:\n",
+                "    # Fallback jeśli zmienne zniknęły\n",
+                "    local_dir = f\"checkpoints/{run_name}\"\n",
+                "    # Szukamy best\n",
+                "    files = glob.glob(f\"{local_dir}/best*.ckpt\")\n",
+                "    best_local_path = files[0] if files else None\n",
+                "    # Szukamy last\n",
+                "    last_local_path = os.path.join(local_dir, \"last.ckpt\")\n",
+                "\n",
+                "if not best_local_path or not os.path.exists(best_local_path):\n",
+                "    raise FileNotFoundError(\"Nie znaleziono modelu 'best' w folderze checkpoints!\")\n",
+                "\n",
+                "# Testowanie BEST\n",
+                "trainer.logger = None # Wyłączamy loggera żeby nie krzyczał\n",
+                "best_model = ResNetTripletGPU.load_from_checkpoint(best_local_path, df=df_full, root_dir=ROOT_DIR, noise_files=[])\n",
+                "results = trainer.test(best_model, dataloaders=test_loader)\n",
+                "acc, loss = results[0]['test_acc'], results[0]['test_loss']\n",
+                "\n",
+                "print(f\"\\n📝 WYNIKI BEST: ACC={acc:.4f}, LOSS={loss:.4f}\")\n",
+                "\n",
+                "# ==========================================\n",
+                "# 4. KOPIOWANIE PLIKÓW NA DYSK GOOGLE\n",
+                "# ==========================================\n",
+                "print(f\"\\n🚚 ROZPOCZYNAM KOPIOWANIE DO: .../Models/{run_name}/\")\n",
+                "\n",
+                "# A) Zapis NAJLEPSZEGO modelu (z wynikami w nazwie)\n",
+                "best_filename = f\"BEST_ACC={acc:.4f}_LOSS={loss:.4f}.ckpt\"\n",
+                "target_best = os.path.join(TARGET_RUN_DIR, best_filename)\n",
+                "\n",
+                "try:\n",
+                "    shutil.copy(best_local_path, target_best)\n",
+                "    print(f\"✅ Zapisano NAJLEPSZY: {best_filename}\")\n",
+                "except Exception as e:\n",
+                "    print(f\"❌ Błąd kopiowania BEST: {e}\")\n",
+                "\n",
+                "# B) Zapis OSTATNIEGO modelu (last.ckpt)\n",
+                "if last_local_path and os.path.exists(last_local_path):\n",
+                "    last_filename = \"LAST_STATE.ckpt\"\n",
+                "    target_last = os.path.join(TARGET_RUN_DIR, last_filename)\n",
+                "    try:\n",
+                "        shutil.copy(last_local_path, target_last)\n",
+                "        print(f\"✅ Zapisano OSTATNI:   {last_filename}\")\n",
+                "    except Exception as e:\n",
+                "        print(f\"❌ Błąd kopiowania LAST: {e}\")\n",
+                "else:\n",
+                "    print(\"⚠️ Nie znaleziono pliku 'last.ckpt'. Upewnij się, że w treningu było 'save_last=True'.\")\n",
+                "\n",
+                "print(\"\\n🎉 Zakończono! Sprawdź folder na Dysku Google.\")"
+            ],
+            "metadata": {
+                "colab": {
+                    "base_uri": "https://localhost:8080/",
+                    "height": 409,
+                    "referenced_widgets": [
+                        "90aa62f6d9ad4aa58ad69b7c3619444e",
+                        "73ed051f7cf34ca28e9763d05b655636"
+                    ]
+                },
+                "id": "h1CzuYaqQRZe",
+                "executionInfo": {
+                    "status": "ok",
+                    "timestamp": 1767452807193,
+                    "user_tz": -60,
+                    "elapsed": 14583,
+                    "user": {
+                        "displayName": "Kamil Maj",
+                        "userId": "12871152428819149924"
+                    }
+                },
+                "outputId": "623fbd47-d92f-4018-cd70-8b5887929880"
+            },
+            "id": "h1CzuYaqQRZe",
+            "execution_count": 19,
+            "outputs": [
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "🛠️ KONFIGURACJA DYSKU I FOLDERÓW...\n",
+                        "✅ Utworzono nowy folder na wyniki: /content/drive/MyDrive/studia/ProjektGsn/Models/ResNet_Triplet_2026-01-03_14-30-56\n",
+                        "\n",
+                        "📊 ROZPOCZYNAM TESTOWANIE NAJLEPSZEGO MODELU...\n",
+                        "Ładowanie 1037 plików treningowych z: /content/dataset/MAD_dataset\n",
+                        "✅ Wszystkie pliki w pamięci RAM.\n"
+                    ]
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stderr",
+                    "text": [
+                        "INFO:pytorch_lightning.accelerators.cuda:LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]\n"
+                    ]
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "Output()"
+                        ],
+                        "application/vnd.jupyter.widget-view+json": {
+                            "version_major": 2,
+                            "version_minor": 0,
+                            "model_id": "90aa62f6d9ad4aa58ad69b7c3619444e"
+                        }
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [
+                            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n",
+                            "┃\u001b[1m \u001b[0m\u001b[1m       Test metric       \u001b[0m\u001b[1m \u001b[0m┃\u001b[1m \u001b[0m\u001b[1m      DataLoader 0       \u001b[0m\u001b[1m \u001b[0m┃\n",
+                            "┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩\n",
+                            "│\u001b[36m \u001b[0m\u001b[36m        test_acc         \u001b[0m\u001b[36m \u001b[0m│\u001b[35m \u001b[0m\u001b[35m   0.9103182554244995    \u001b[0m\u001b[35m \u001b[0m│\n",
+                            "│\u001b[36m \u001b[0m\u001b[36m        test_loss        \u001b[0m\u001b[36m \u001b[0m│\u001b[35m \u001b[0m\u001b[35m   0.11438002437353134   \u001b[0m\u001b[35m \u001b[0m│\n",
+                            "└───────────────────────────┴───────────────────────────┘\n"
+                        ],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n",
+                            "┃<span style=\"font-weight: bold\">        Test metric        </span>┃<span style=\"font-weight: bold\">       DataLoader 0        </span>┃\n",
+                            "┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩\n",
+                            "│<span style=\"color: #008080; text-decoration-color: #008080\">         test_acc          </span>│<span style=\"color: #800080; text-decoration-color: #800080\">    0.9103182554244995     </span>│\n",
+                            "│<span style=\"color: #008080; text-decoration-color: #008080\">         test_loss         </span>│<span style=\"color: #800080; text-decoration-color: #800080\">    0.11438002437353134    </span>│\n",
+                            "└───────────────────────────┴───────────────────────────┘\n",
+                            "</pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "display_data",
+                    "data": {
+                        "text/plain": [],
+                        "text/html": [
+                            "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"></pre>\n"
+                        ]
+                    },
+                    "metadata": {}
+                },
+                {
+                    "output_type": "stream",
+                    "name": "stdout",
+                    "text": [
+                        "\n",
+                        "📝 WYNIKI BEST: ACC=0.9103, LOSS=0.1144\n",
+                        "\n",
+                        "🚚 ROZPOCZYNAM KOPIOWANIE DO: .../Models/ResNet_Triplet_2026-01-03_14-30-56/\n",
+                        "✅ Zapisano NAJLEPSZY: BEST_ACC=0.9103_LOSS=0.1144.ckpt\n",
+                        "⚠️ Nie znaleziono pliku 'last.ckpt'. Upewnij się, że w treningu było 'save_last=True'.\n",
+                        "\n",
+                        "🎉 Zakończono! Sprawdź folder na Dysku Google.\n"
+                    ]
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "colab": {
+            "provenance": [],
+            "gpuType": "L4"
+        },
+        "kernelspec": {
+            "display_name": "Python 3",
+            "name": "python3"
+        },
+        "language_info": {
+            "codemirror_mode": {
+                "name": "ipython",
+                "version": 3
+            },
+            "file_extension": ".py",
+            "mimetype": "text/x-python",
+            "name": "python",
+            "nbconvert_exporter": "python",
+            "pygments_lexer": "ipython3",
+            "version": "3.10.12"
+        },
+        "widgets": {
+            "application/vnd.jupyter.widget-state+json": {
+                "d3be773f6b1841cc911be5e118c9e886": {
+                    "model_module": "@jupyter-widgets/output",
+                    "model_name": "OutputModel",
+                    "model_module_version": "1.0.0",
+                    "state": {
+                        "_dom_classes": [],
+                        "_model_module": "@jupyter-widgets/output",
+                        "_model_module_version": "1.0.0",
+                        "_model_name": "OutputModel",
+                        "_view_count": null,
+                        "_view_module": "@jupyter-widgets/output",
+                        "_view_module_version": "1.0.0",
+                        "_view_name": "OutputView",
+                        "layout": "IPY_MODEL_0951d72ee79c466a82748ecb7c6af851",
+                        "msg_id": "",
+                        "outputs": [
+                            {
+                                "output_type": "display_data",
+                                "data": {
+                                    "text/plain": "Epoch 19/19 \u001b[38;2;98;6;224m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m 402/402 \u001b[2m0:00:59 • 0:00:00\u001b[0m \u001b[2;4m6.73it/s\u001b[0m \u001b[3mv_num: oibr train_loss: 0.041     \u001b[0m\n                                                                                 \u001b[3mtrain_acc: 0.980 val_loss: 0.046  \u001b[0m\n                                                                                 \u001b[3mval_acc: 0.967                    \u001b[0m\n",
+                                    "text/html": "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">Epoch 19/19 <span style=\"color: #6206e0; text-decoration-color: #6206e0\">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span> 402/402 <span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\">0:00:59 • 0:00:00</span> <span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f; text-decoration: underline\">6.73it/s</span> <span style=\"font-style: italic\">v_num: oibr train_loss: 0.041     </span>\n                                                                                 <span style=\"font-style: italic\">train_acc: 0.980 val_loss: 0.046  </span>\n                                                                                 <span style=\"font-style: italic\">val_acc: 0.967                    </span>\n</pre>\n"
+                                },
+                                "metadata": {}
+                            }
+                        ]
+                    }
+                },
+                "0951d72ee79c466a82748ecb7c6af851": {
+                    "model_module": "@jupyter-widgets/base",
+                    "model_name": "LayoutModel",
+                    "model_module_version": "1.2.0",
+                    "state": {
+                        "_model_module": "@jupyter-widgets/base",
+                        "_model_module_version": "1.2.0",
+                        "_model_name": "LayoutModel",
+                        "_view_count": null,
+                        "_view_module": "@jupyter-widgets/base",
+                        "_view_module_version": "1.2.0",
+                        "_view_name": "LayoutView",
+                        "align_content": null,
+                        "align_items": null,
+                        "align_self": null,
+                        "border": null,
+                        "bottom": null,
+                        "display": null,
+                        "flex": null,
+                        "flex_flow": null,
+                        "grid_area": null,
+                        "grid_auto_columns": null,
+                        "grid_auto_flow": null,
+                        "grid_auto_rows": null,
+                        "grid_column": null,
+                        "grid_gap": null,
+                        "grid_row": null,
+                        "grid_template_areas": null,
+                        "grid_template_columns": null,
+                        "grid_template_rows": null,
+                        "height": null,
+                        "justify_content": null,
+                        "justify_items": null,
+                        "left": null,
+                        "margin": null,
+                        "max_height": null,
+                        "max_width": null,
+                        "min_height": null,
+                        "min_width": null,
+                        "object_fit": null,
+                        "object_position": null,
+                        "order": null,
+                        "overflow": null,
+                        "overflow_x": null,
+                        "overflow_y": null,
+                        "padding": null,
+                        "right": null,
+                        "top": null,
+                        "visibility": null,
+                        "width": null
+                    }
+                },
+                "90aa62f6d9ad4aa58ad69b7c3619444e": {
+                    "model_module": "@jupyter-widgets/output",
+                    "model_name": "OutputModel",
+                    "model_module_version": "1.0.0",
+                    "state": {
+                        "_dom_classes": [],
+                        "_model_module": "@jupyter-widgets/output",
+                        "_model_module_version": "1.0.0",
+                        "_model_name": "OutputModel",
+                        "_view_count": null,
+                        "_view_module": "@jupyter-widgets/output",
+                        "_view_module_version": "1.0.0",
+                        "_view_name": "OutputView",
+                        "layout": "IPY_MODEL_73ed051f7cf34ca28e9763d05b655636",
+                        "msg_id": "",
+                        "outputs": [
+                            {
+                                "output_type": "display_data",
+                                "data": {
+                                    "text/plain": "Testing \u001b[38;2;98;6;224m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m 17/17 \u001b[2m0:00:01 • 0:00:00\u001b[0m \u001b[2;4m15.15it/s\u001b[0m  \n",
+                                    "text/html": "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">Testing <span style=\"color: #6206e0; text-decoration-color: #6206e0\">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span> 17/17 <span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f\">0:00:01 • 0:00:00</span> <span style=\"color: #7f7f7f; text-decoration-color: #7f7f7f; text-decoration: underline\">15.15it/s</span>  \n</pre>\n"
+                                },
+                                "metadata": {}
+                            }
+                        ]
+                    }
+                },
+                "73ed051f7cf34ca28e9763d05b655636": {
+                    "model_module": "@jupyter-widgets/base",
+                    "model_name": "LayoutModel",
+                    "model_module_version": "1.2.0",
+                    "state": {
+                        "_model_module": "@jupyter-widgets/base",
+                        "_model_module_version": "1.2.0",
+                        "_model_name": "LayoutModel",
+                        "_view_count": null,
+                        "_view_module": "@jupyter-widgets/base",
+                        "_view_module_version": "1.2.0",
+                        "_view_name": "LayoutView",
+                        "align_content": null,
+                        "align_items": null,
+                        "align_self": null,
+                        "border": null,
+                        "bottom": null,
+                        "display": null,
+                        "flex": null,
+                        "flex_flow": null,
+                        "grid_area": null,
+                        "grid_auto_columns": null,
+                        "grid_auto_flow": null,
+                        "grid_auto_rows": null,
+                        "grid_column": null,
+                        "grid_gap": null,
+                        "grid_row": null,
+                        "grid_template_areas": null,
+                        "grid_template_columns": null,
+                        "grid_template_rows": null,
+                        "height": null,
+                        "justify_content": null,
+                        "justify_items": null,
+                        "left": null,
+                        "margin": null,
+                        "max_height": null,
+                        "max_width": null,
+                        "min_height": null,
+                        "min_width": null,
+                        "object_fit": null,
+                        "object_position": null,
+                        "order": null,
+                        "overflow": null,
+                        "overflow_x": null,
+                        "overflow_y": null,
+                        "padding": null,
+                        "right": null,
+                        "top": null,
+                        "visibility": null,
+                        "width": null
+                    }
+                }
+            }
+        },
+        "accelerator": "GPU"
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5
+}
