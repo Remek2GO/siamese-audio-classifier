@@ -6,3 +6,8 @@ YAMNet.ipynb
 .vscode/
 sys
 MAD_dataset/
+Models/
+MAD_dataset/
+siamese-audio-classifier/
+wandb/
+checkpoints/
